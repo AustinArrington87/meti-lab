@@ -83,10 +83,17 @@ main { flex: 1; overflow: hidden; }
 .btn-send:hover:not(:disabled) { background: #059669; }
 .btn-send:disabled { opacity: .5; cursor: not-allowed; }
 
+/* Risk check button */
+.btn-risk { padding: 5px 11px; background: var(--white); color: var(--gray-600); border: 1px solid var(--gray-200); border-radius: var(--radius); font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.btn-risk:hover:not(:disabled) { border-color: var(--gray-400); color: var(--gray-800); }
+.btn-risk:disabled { opacity: .5; cursor: not-allowed; }
+
 /* Map panel */
 .map-panel { position: relative; }
 #map { width: 100%; height: calc(100vh - 49px); }
-.map-legend { position: absolute; bottom: 24px; left: 16px; background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 8px 12px; font-size: .78rem; display: flex; gap: 12px; align-items: center; z-index: 1000; box-shadow: var(--shadow); }
-.legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-.legend-dot.clean { background: var(--green); }
-.legend-dot.fixed { background: var(--amber); }
+.map-legend { position: absolute; bottom: 24px; left: 16px; background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 8px 12px; font-size: .78rem; display: flex; gap: 8px; align-items: center; z-index: 1000; box-shadow: var(--shadow); flex-wrap: wrap; }
+.legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 3px; }
+.legend-dot.unchecked { background: #9ca3af; }
+.legend-dot.clean    { background: #10b981; }
+.legend-dot.conflict { background: #ef4444; }
+.legend-dot.unknown  { background: #f59e0b; }

@@ -80,3 +80,70 @@ def check_intersection(
         return []
 
     return resp.json()
+
+
+def check_conflicts_db(session_features: list) -> dict:
+    """
+    Check uploaded features against ALL sources in the METI sources table using
+    PostGIS ST_Intersects. Queries the DB directly so results are not scoped to
+    a single account — every existing source across all accounts is checked.
+
+    Returns a dict keyed by feature id:
+      { "risk": "green" | "red" | "yellow",
+        "conflict": bool,
+        "conflict_with": [source_id, ...],
+        "reason": str (on yellow only) }
+
+    green  = no spatial overlap with any source in the ledger
+    red    = geometry overlaps one or more existing sources
+    yellow = DB unavailable or geometry is invalid
+    """
+    import json
+    from backend.services.db import get_db_connection
+
+    try:
+        conn = get_db_connection()
+    except Exception as exc:
+        return {
+            f["id"]: {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": f"db_connect: {exc}"}
+            for f in session_features
+        }
+
+    result = {}
+    try:
+        with conn.cursor() as cur:
+            for f in session_features:
+                feature_id = f["id"]
+                geom_dict = f.get("geometry")
+
+                if not geom_dict:
+                    result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": "null_geometry"}
+                    continue
+
+                try:
+                    geom_json = json.dumps(geom_dict)
+                    # Two-pass PostGIS pattern: && does a fast bounding-box
+                    # lookup via GiST index; ST_Intersects does the precise
+                    # geometry check only on those candidates.
+                    uploaded = "ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)"
+                    cur.execute(
+                        f"""
+                        SELECT id::text FROM sources
+                        WHERE geometry && {uploaded}
+                          AND ST_Intersects(geometry, {uploaded})
+                        """,
+                        (geom_json, geom_json),
+                    )
+                    rows = cur.fetchall()
+                    conflict_ids = [row[0] for row in rows]
+                    result[feature_id] = {
+                        "risk": "red" if conflict_ids else "green",
+                        "conflict": bool(conflict_ids),
+                        "conflict_with": conflict_ids,
+                    }
+                except Exception as exc:
+                    result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": str(exc)}
+    finally:
+        conn.close()
+
+    return result
