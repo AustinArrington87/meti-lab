@@ -22,6 +22,9 @@ class Settings:
     db_host: str
     db_port: str
     app_secret_key: str
+    # Supabase REST API (for spatial queries via HTTPS — bypasses VPC restriction)
+    supabase_url: str
+    supabase_service_key: str
     # Admin M2M credentials (full access — all accounts)
     meti_client_id: str
     meti_client_secret: str
@@ -92,6 +95,8 @@ def get_settings() -> Settings:
         db_host=os.environ.get("DB_HOST", ""),
         db_port=os.environ.get("DB_PORT", "5432"),
         app_secret_key=os.environ.get("APP_SECRET_KEY", "dev-secret"),
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_service_key=os.environ.get("SUPABASE_SERVICE_KEY", ""),
         meti_client_id=os.environ.get("METI_CLIENT_ID", ""),
         meti_client_secret=os.environ.get("METI_CLIENT_SECRET", ""),
         account_credentials=account_credentials,

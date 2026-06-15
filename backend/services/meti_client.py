@@ -84,71 +84,65 @@ def check_intersection(
 
 def check_conflicts_db(session_features: list) -> dict:
     """
-    Check uploaded features against ALL sources in the METI sources table using
-    PostGIS ST_Intersects. Queries the DB directly so results are not scoped to
-    a single account — every existing source across all accounts is checked.
+    Check uploaded features against ALL sources via the Supabase RPC endpoint
+    (find_intersecting_sources). Uses HTTPS + service key so it works outside
+    the VPC. The RPC runs ST_Intersects with a GiST index on the DB side.
 
     Returns a dict keyed by feature id:
       { "risk": "green" | "red" | "yellow",
         "conflict": bool,
-        "conflict_with": [source_id, ...],
-        "reason": str (on yellow only) }
-
-    green  = no spatial overlap with any source in the ledger
-    red    = geometry overlaps one or more existing sources
-    yellow = DB unavailable or geometry is invalid
+        "conflict_with": [source_id, ...] }
     """
     import json
     import logging
-    from backend.services.db import get_db_connection
 
     log = logging.getLogger(__name__)
 
-    try:
-        conn = get_db_connection()
-    except Exception as exc:
-        log.error("check_conflicts_db: DB connect failed: %s", exc)
+    supabase_url = settings.supabase_url.rstrip("/")
+    supabase_key = settings.supabase_service_key
+
+    if not supabase_url or not supabase_key:
+        log.error("check_conflicts_db: SUPABASE_URL or SUPABASE_SERVICE_KEY not configured")
         return {
-            f["id"]: {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": "db_unavailable"}
+            f["id"]: {"risk": "yellow", "conflict": None, "conflict_with": []}
             for f in session_features
         }
 
+    headers = {
+        "Authorization": f"Bearer {supabase_key}",
+        "apikey": supabase_key,
+        "Content-Type": "application/json",
+    }
+
     result = {}
-    try:
-        with conn.cursor() as cur:
-            for f in session_features:
-                feature_id = f["id"]
-                geom_dict = f.get("geometry")
+    for f in session_features:
+        feature_id = f["id"]
+        geom_dict = f.get("geometry")
 
-                if not geom_dict:
-                    result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": "null_geometry"}
-                    continue
+        if not geom_dict:
+            result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": []}
+            continue
 
-                try:
-                    geom_json = json.dumps(geom_dict)
-                    # Two-pass PostGIS pattern: && does a fast bounding-box
-                    # lookup via GiST index; ST_Intersects does the precise
-                    # geometry check only on those candidates.
-                    uploaded = "ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)"
-                    cur.execute(
-                        f"""
-                        SELECT id::text FROM sources
-                        WHERE geometry && {uploaded}
-                          AND ST_Intersects(geometry, {uploaded})
-                        """,
-                        (geom_json, geom_json),
-                    )
-                    rows = cur.fetchall()
-                    conflict_ids = [row[0] for row in rows]
-                    result[feature_id] = {
-                        "risk": "red" if conflict_ids else "green",
-                        "conflict": bool(conflict_ids),
-                        "conflict_with": conflict_ids,
-                    }
-                except Exception as exc:
-                    log.error("check_conflicts_db: query failed for %s: %s", feature_id, exc)
-                    result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": "query_error"}
-    finally:
-        conn.close()
+        try:
+            resp = requests.post(
+                f"{supabase_url}/rest/v1/rpc/find_intersecting_sources",
+                headers=headers,
+                json={"geojson_geometry": json.dumps(geom_dict)},
+                timeout=20,
+            )
+            if not resp.ok:
+                log.error("check_conflicts_db: RPC error for %s: %s", feature_id, resp.status_code)
+                result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": []}
+                continue
+
+            conflict_ids = [row["id"] for row in resp.json()]
+            result[feature_id] = {
+                "risk": "red" if conflict_ids else "green",
+                "conflict": bool(conflict_ids),
+                "conflict_with": conflict_ids,
+            }
+        except Exception as exc:
+            log.error("check_conflicts_db: request failed for %s: %s", feature_id, exc)
+            result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": []}
 
     return result
