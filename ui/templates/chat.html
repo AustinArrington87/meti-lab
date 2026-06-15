@@ -36,7 +36,7 @@
   <div class="map-panel">
     <div id="map"></div>
     <div class="map-legend" id="map-legend">
-      <span class="legend-dot unchecked"></span> Not checked
+      <span id="leg-checking" style="color:#6b7280;font-size:.78rem">Checking conflicts…</span>
       <span class="legend-dot clean" style="display:none" id="leg-green"></span>
       <span id="leg-green-label" style="display:none"> Clear </span>
       <span class="legend-dot conflict" style="display:none" id="leg-red"></span>
@@ -81,10 +81,10 @@ const featureLayers = {};  // feature_id → Leaflet layer
 const allBounds = [];
 
 const RISK_STYLE = {
-  unchecked: { color: '#6b7280', fillColor: '#e5e7eb', weight: 2, fillOpacity: 0.3 },
-  green:     { color: '#10b981', fillColor: '#d1fae5', weight: 2.5, fillOpacity: 0.35 },
-  yellow:    { color: '#f59e0b', fillColor: '#fef3c7', weight: 2.5, fillOpacity: 0.35 },
-  red:       { color: '#ef4444', fillColor: '#fee2e2', weight: 2.5, fillOpacity: 0.4 },
+  unchecked: { color: '#6b7280', fillColor: '#d1d5db', weight: 1.5, fillOpacity: 0.5 },
+  green:     { color: '#10b981', fillColor: '#d1fae5', weight: 2.5, fillOpacity: 0.45 },
+  yellow:    { color: '#f59e0b', fillColor: '#fef3c7', weight: 2.5, fillOpacity: 0.45 },
+  red:       { color: '#ef4444', fillColor: '#fee2e2', weight: 2.5, fillOpacity: 0.5 },
 };
 
 FEATURES.forEach(f => {
@@ -113,9 +113,10 @@ function applyRiskToMap(featureId, risk) {
 
 function updateLegend() {
   const vals = Object.values(riskState);
-  const show = (id, labelId, show) => {
-    document.getElementById(id).style.display = show ? 'inline-block' : 'none';
-    if (labelId) document.getElementById(labelId).style.display = show ? 'inline' : 'none';
+  document.getElementById('leg-checking').style.display = 'none';
+  const show = (id, labelId, visible) => {
+    document.getElementById(id).style.display = visible ? 'inline-block' : 'none';
+    if (labelId) document.getElementById(labelId).style.display = visible ? 'inline' : 'none';
   };
   show('leg-green', 'leg-green-label', vals.includes('green'));
   show('leg-red', 'leg-red-label', vals.includes('red'));
@@ -141,7 +142,7 @@ async function runRiskCheck() {
     const data = await resp.json();
 
     if (data.error) {
-      setMessageHtml('risk-checking', `Risk check failed: ${renderMarkdown(data.error)}`);
+      setMessageHtml('risk-checking', `Risk check failed: ${data.error}`);
       btn.textContent = 'Check Risk';
       btn.disabled = false;
       return;
@@ -161,7 +162,15 @@ async function runRiskCheck() {
 
     if ((s.green || 0) > 0)  lines.push(`- **${s.green} clear** (green) — no conflict detected`);
     if ((s.red   || 0) > 0)  lines.push(`- **${s.red} conflict** (red) — overlaps an existing METI source`);
-    if ((s.yellow|| 0) > 0)  lines.push(`- **${s.yellow} unknown** (yellow) — API check unavailable`);
+    if ((s.yellow|| 0) > 0) {
+      const reasons = [...new Set(
+        Object.values(riskMap)
+          .filter(v => v.risk === 'yellow' && v.reason)
+          .map(v => v.reason)
+      )];
+      const detail = reasons.length ? ` (${reasons[0]})` : '';
+      lines.push(`- **${s.yellow} unknown** (yellow) — conflict check unavailable${detail}`);
+    }
 
     if (!data.has_dates) {
       lines.push('\n_Note: start/end dates are not set yet. Conflict detection is most accurate once you provide the reporting period._');
@@ -177,7 +186,7 @@ async function runRiskCheck() {
       lines.push('\n**Conflicting fields:**\n' + conflicts);
     }
 
-    setMessageHtml('risk-checking', renderMarkdown(lines.join('\n')));
+    setMessageHtml('risk-checking', lines.join('\n'));
     btn.textContent = 'Re-check Risk';
     btn.disabled = false;
 
@@ -217,6 +226,9 @@ function setMessageHtml(id, html) {
 if (OPENING_MESSAGE) {
   appendMessage('agent', OPENING_MESSAGE, 'opening-msg');
 }
+
+// Auto-run risk check on load
+window.addEventListener('load', () => runRiskCheck());
 
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }

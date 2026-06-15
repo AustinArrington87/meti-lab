@@ -99,11 +99,15 @@ def check_conflicts_db(session_features: list) -> dict:
     yellow = DB unavailable or geometry is invalid
     """
     import json
+    import logging
     from backend.services.db import get_db_connection
+
+    log = logging.getLogger(__name__)
 
     try:
         conn = get_db_connection()
     except Exception as exc:
+        log.error("check_conflicts_db: DB connect failed: %s", exc)
         return {
             f["id"]: {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": f"db_connect: {exc}"}
             for f in session_features
@@ -142,6 +146,7 @@ def check_conflicts_db(session_features: list) -> dict:
                         "conflict_with": conflict_ids,
                     }
                 except Exception as exc:
+                    log.error("check_conflicts_db: query failed for %s: %s", feature_id, exc)
                     result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": str(exc)}
     finally:
         conn.close()
