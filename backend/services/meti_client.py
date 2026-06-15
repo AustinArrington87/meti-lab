@@ -109,7 +109,7 @@ def check_conflicts_db(session_features: list) -> dict:
     except Exception as exc:
         log.error("check_conflicts_db: DB connect failed: %s", exc)
         return {
-            f["id"]: {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": f"db_connect: {exc}"}
+            f["id"]: {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": "db_unavailable"}
             for f in session_features
         }
 
@@ -147,7 +147,7 @@ def check_conflicts_db(session_features: list) -> dict:
                     }
                 except Exception as exc:
                     log.error("check_conflicts_db: query failed for %s: %s", feature_id, exc)
-                    result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": str(exc)}
+                    result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": [], "reason": "query_error"}
     finally:
         conn.close()
 

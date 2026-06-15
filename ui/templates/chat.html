@@ -162,15 +162,7 @@ async function runRiskCheck() {
 
     if ((s.green || 0) > 0)  lines.push(`- **${s.green} clear** (green) — no conflict detected`);
     if ((s.red   || 0) > 0)  lines.push(`- **${s.red} conflict** (red) — overlaps an existing METI source`);
-    if ((s.yellow|| 0) > 0) {
-      const reasons = [...new Set(
-        Object.values(riskMap)
-          .filter(v => v.risk === 'yellow' && v.reason)
-          .map(v => v.reason)
-      )];
-      const detail = reasons.length ? ` (${reasons[0]})` : '';
-      lines.push(`- **${s.yellow} unknown** (yellow) — conflict check unavailable${detail}`);
-    }
+    if ((s.yellow|| 0) > 0)  lines.push(`- **${s.yellow} unknown** (yellow) — conflict check unavailable`);
 
     if (!data.has_dates) {
       lines.push('\n_Note: start/end dates are not set yet. Conflict detection is most accurate once you provide the reporting period._');
