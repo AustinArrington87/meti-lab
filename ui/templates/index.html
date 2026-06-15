@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}METI Lab — Upload{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="upload-page">
+  <div class="upload-card">
+    <h1>Prepare Fields for METI</h1>
+    <p class="subtitle">Upload any GIS file — or drag an entire shapefile folder. The agent will fix geometry issues, collect required metadata, and produce a valid METI GeoJSON payload.</p>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <!-- Hidden form — JS populates it before submit -->
+    <form id="upload-form" method="POST" action="/upload" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="" />
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-icon" id="drop-icon">📂</div>
+        <p class="drop-label" id="drop-label">Drag &amp; drop your GIS file or folder here</p>
+        <p class="drop-sub">or click to browse</p>
+        <p class="drop-formats">GeoJSON · KML · Shapefile folder or .zip · GPX · GML</p>
+        <!-- single-file fallback input -->
+        <input type="file" id="file-input" name="file"
+               accept=".geojson,.json,.kml,.zip,.gpx,.gml,.shp"
+               style="display:none" />
+        <div id="selected-file" class="selected-file" style="display:none"></div>
+        <div id="zip-progress" class="zip-progress" style="display:none">Zipping files…</div>
+      </div>
+      <button type="submit" class="btn-primary" id="submit-btn" disabled>
+        Analyze &amp; Start Chat →
+      </button>
+    </form>
+  </div>
+
+  <div class="info-panel">
+    <h2>What METI Lab does</h2>
+    <ul>
+      <li>Parses GeoJSON, KML, Shapefile, GPX, and GML files</li>
+      <li>Accepts a whole shapefile folder — just drag it in</li>
+      <li>Fixes invalid polygons (self-intersections, winding order)</li>
+      <li>Guides you through required METI fields via chat</li>
+      <li>Checks for spatial conflicts with existing METI sources</li>
+      <li>Exports a valid METI GeoJSON ready for the source ledger</li>
+    </ul>
+    <div class="shp-tip">
+      <strong>Shapefile tip:</strong> You can drag the entire folder containing .shp, .dbf, .prj, etc. files — METI Lab will zip and read them automatically. Multiple shapefiles in one folder are all loaded.
+    </div>
+  </div>
+</div>
+
+<script>
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const submitBtn = document.getElementById('submit-btn');
+const selectedFile = document.getElementById('selected-file');
+const dropIcon = document.getElementById('drop-icon');
+const dropLabel = document.getElementById('drop-label');
+const zipProgress = document.getElementById('zip-progress');
+const form = document.getElementById('upload-form');
+
+// Click to browse (single file)
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) {
+    const f = fileInput.files[0];
+    showSelected(f.name, f.size);
+    // file already attached to the hidden input — form submits normally
+  }
+});
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+
+dropZone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+
+  const items = Array.from(e.dataTransfer.items || []);
+  const files = Array.from(e.dataTransfer.files || []);
+
+  // Try to collect files via FileSystem API (handles folders)
+  const collectedFiles = await collectFiles(items, files);
+
+  if (!collectedFiles.length) {
+    showError('No files found in the dropped item.');
+    return;
+  }
+
+  // Single supported file — attach directly
+  const DIRECT_EXTS = new Set(['.geojson', '.json', '.kml', '.gpx', '.gml', '.zip']);
+  if (collectedFiles.length === 1) {
+    const f = collectedFiles[0];
+    const ext = extOf(f.name);
+    if (DIRECT_EXTS.has(ext)) {
+      attachFile(f, f.name);
+      showSelected(f.name, f.size);
+      return;
+    }
+  }
+
+  // Multiple files or .shp — zip them all
+  zipProgress.style.display = 'block';
+  selectedFile.style.display = 'none';
+  submitBtn.disabled = true;
+
+  try {
+    const zip = new JSZip();
+    for (const f of collectedFiles) {
+      const buf = await f.arrayBuffer();
+      zip.file(f.name, buf);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const zipName = 'fields.zip';
+    attachFile(new File([blob], zipName, { type: 'application/zip' }), zipName);
+    zipProgress.style.display = 'none';
+    showSelected(`${zipName} (${collectedFiles.length} files zipped)`, blob.size);
+  } catch (err) {
+    zipProgress.style.display = 'none';
+    showError('Failed to zip files: ' + err.message);
+  }
+});
+
+// Collect files from DataTransferItems (handles folders recursively)
+async function collectFiles(items, fallbackFiles) {
+  if (!items.length || !items[0].webkitGetAsEntry) {
+    return fallbackFiles;
+  }
+
+  const result = [];
+  const tasks = items.map(item => {
+    const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+    return entry ? traverseEntry(entry, result) : Promise.resolve();
+  });
+  await Promise.all(tasks);
+  return result.length ? result : fallbackFiles;
+}
+
+function traverseEntry(entry, result) {
+  if (entry.isFile) {
+    return new Promise(resolve => {
+      entry.file(f => { result.push(f); resolve(); }, resolve);
+    });
+  }
+  if (entry.isDirectory) {
+    return new Promise(resolve => {
+      const reader = entry.createReader();
+      const readAll = (acc) => {
+        reader.readEntries(async entries => {
+          if (!entries.length) { resolve(); return; }
+          await Promise.all(entries.map(e => traverseEntry(e, result)));
+          readAll(acc);
+        });
+      };
+      readAll([]);
+    });
+  }
+  return Promise.resolve();
+}
+
+function extOf(name) {
+  const dot = name.lastIndexOf('.');
+  return dot >= 0 ? name.slice(dot).toLowerCase() : '';
+}
+
+function attachFile(file, name) {
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  fileInput.files = dt.files;
+}
+
+function showSelected(name, size) {
+  const kb = (size / 1024).toFixed(1);
+  selectedFile.textContent = `✓ ${name} (${kb} KB)`;
+  selectedFile.style.display = 'block';
+  submitBtn.disabled = false;
+  dropIcon.textContent = '✅';
+  dropLabel.textContent = 'File ready';
+}
+
+function showError(msg) {
+  selectedFile.textContent = '⚠️ ' + msg;
+  selectedFile.style.display = 'block';
+  selectedFile.style.color = '#dc2626';
+  submitBtn.disabled = true;
+}
+
+form.addEventListener('submit', () => {
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Uploading…';
+});
+</script>
+{% endblock %}

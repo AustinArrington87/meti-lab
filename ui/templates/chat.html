@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}METI Lab — {{ file_name }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+
+  <!-- LEFT: Chat panel -->
+  <div class="chat-panel">
+    <div class="chat-header">
+      <span class="chat-file">{{ file_name }}</span>
+      <span class="chat-meta">{{ feature_count }} field{{ 's' if feature_count != 1 else '' }}</span>
+      <button id="export-btn" class="btn-export" style="display:none"
+              onclick="exportFile()">Export METI GeoJSON</button>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <!-- Opening message rendered by JS so markdown is applied -->
+    </div>
+
+    <div class="chat-input-row">
+      <textarea id="user-input" class="chat-input" rows="2"
+                placeholder="Ask a question or provide metadata…"
+                onkeydown="handleKey(event)"></textarea>
+      <button class="btn-send" id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: Map panel -->
+  <div class="map-panel">
+    <div id="map"></div>
+    <div class="map-legend">
+      <span class="legend-dot clean"></span> Clean &nbsp;
+      <span class="legend-dot fixed"></span> Fixed
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SESSION_ID = "{{ session_id }}";
+const FEATURES = {{ features | tojson }};
+const OPENING_MESSAGE = {{ opening_message | tojson }};
+
+// ---------------------------------------------------------------------------
+// Markdown renderer
+// ---------------------------------------------------------------------------
+function renderMarkdown(text) {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+// ---------------------------------------------------------------------------
+// Map
+// ---------------------------------------------------------------------------
+const map = L.map('map', { zoomControl: true });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+const layerGroup = L.layerGroup().addTo(map);
+const allBounds = [];
+
+function renderFeatures(featureList) {
+  layerGroup.clearLayers();
+  allBounds.length = 0;
+  featureList.forEach(f => {
+    if (!f.geometry) return;
+    const hasIssues = f.issues && f.issues.length > 0;
+    const layer = L.geoJSON({
+      type: 'Feature',
+      id: f.id,
+      geometry: f.geometry,
+      properties: {}
+    }, {
+      style: {
+        color: hasIssues ? '#f59e0b' : '#10b981',
+        weight: 2,
+        fillOpacity: 0.25,
+        fillColor: hasIssues ? '#fef3c7' : '#d1fae5',
+      }
+    });
+    layer.bindTooltip(`<strong>${f.id}</strong><br>${f.hectares || '?'} ha`, { sticky: true });
+    layer.addTo(layerGroup);
+    try {
+      const b = layer.getBounds();
+      if (b.isValid()) allBounds.push(b);
+    } catch (e) {}
+  });
+  if (allBounds.length) {
+    const combined = allBounds.reduce((acc, b) => acc.extend(b), allBounds[0]);
+    map.fitBounds(combined, { padding: [20, 20] });
+  }
+}
+
+renderFeatures(FEATURES);
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+const messagesEl = document.getElementById('chat-messages');
+const inputEl    = document.getElementById('user-input');
+const sendBtn    = document.getElementById('send-btn');
+
+function appendMessage(role, html, id) {
+  const div = document.createElement('div');
+  div.className = `msg msg-${role}`;
+  if (id) div.id = id;
+  const inner = document.createElement('div');
+  inner.className = 'msg-content';
+  inner.innerHTML = html;
+  div.appendChild(inner);
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function setMessageHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.querySelector('.msg-content').innerHTML = html;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// Render opening message with markdown
+if (OPENING_MESSAGE) {
+  appendMessage('agent', renderMarkdown(OPENING_MESSAGE), 'opening-msg');
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function sendMessage() {
+  const msg = inputEl.value.trim();
+  if (!msg) return;
+
+  inputEl.value = '';
+  sendBtn.disabled = true;
+  inputEl.disabled = true;
+
+  appendMessage('user', renderMarkdown(msg));
+
+  const replyId = 'reply-' + Date.now();
+  appendMessage('agent', '<em>Thinking…</em>', replyId);
+
+  let buffer = '';
+
+  fetch('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: SESSION_ID, message: msg })
+  })
+  .then(resp => {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+
+    // Accumulate partial SSE lines across chunks
+    let partial = '';
+
+    function read() {
+      reader.read().then(({ done, value }) => {
+        if (done) {
+          sendBtn.disabled = false;
+          inputEl.disabled = false;
+          inputEl.focus();
+          return;
+        }
+
+        partial += decoder.decode(value, { stream: true });
+        const lines = partial.split('\n');
+        // Keep the last (possibly incomplete) line
+        partial = lines.pop();
+
+        lines.forEach(line => {
+          line = line.trim();
+          if (!line.startsWith('data: ')) return;
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.type === 'text') {
+              buffer += parsed.content;
+              setMessageHtml(replyId, renderMarkdown(buffer));
+            } else if (parsed.type === 'done') {
+              if (parsed.export_ready) {
+                document.getElementById('export-btn').style.display = 'inline-block';
+              }
+              sendBtn.disabled = false;
+              inputEl.disabled = false;
+              inputEl.focus();
+            } else if (parsed.type === 'error') {
+              buffer += '\n\nError: ' + parsed.content;
+              setMessageHtml(replyId, renderMarkdown(buffer));
+              sendBtn.disabled = false;
+              inputEl.disabled = false;
+            }
+          } catch (e) { /* incomplete JSON — wait for next chunk */ }
+        });
+
+        read();
+      });
+    }
+    read();
+  })
+  .catch(err => {
+    setMessageHtml(replyId, 'Network error: ' + err);
+    sendBtn.disabled = false;
+    inputEl.disabled = false;
+  });
+}
+
+function exportFile() {
+  window.location.href = `/export/${SESSION_ID}`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,15 @@
+fastapi>=0.111
+uvicorn[standard]
+flask>=3.0
+flask-session
+authlib
+geopandas>=0.14
+fiona>=1.9
+shapely>=2.0
+pyproj>=3.6
+anthropic>=0.28
+python-dotenv
+python-multipart
+requests
+python-jose[cryptography]
+psycopg2-binary

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}METI Lab{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="logo">METI Lab</a>
+    <span class="tagline">GIS → METI Source Ledger</span>
+    <div class="topbar-right">
+      {% if account_name is defined and account_name %}
+        <span class="account-badge{% if is_admin is defined and is_admin %} admin{% endif %}">
+          {% if is_admin is defined and is_admin %}★ {% endif %}{{ account_name }}
+        </span>
+      {% endif %}
+      {% if user is defined and user.get('name') %}
+        <span class="user-name">{{ user.get('name') }}</span>
+        <a href="/logout" class="btn-logout">Sign out</a>
+      {% endif %}
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
