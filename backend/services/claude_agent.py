@@ -54,6 +54,7 @@ Your job is to help users prepare their field boundary data for submission to th
   2. **attribute_type** — "What environmental attributes apply? Pick one or more: CARBON_REMOVAL, CARBON_AVOIDANCE, CI_SCORE, BIODIVERSITY, RENEWABLE_ENERGY, WATER_QUALITY, WATER_QUANTITY"
   3. **geometry_source** — "How was the boundary geometry created? Options: CUSTODIAN_DRAWN (farmer/operator drew it), AUTHORITATIVE_GIS (from a government dataset), EXTERNAL_REGISTRY (from a third-party registry)"
 - If the user skips any of these, save the rest and move on — do not block export on optional fields.
+- After updating `start_at` or `end_at`, DO NOT claim any risk status (green/red/yellow) — the UI re-runs the risk check automatically and the user will see the updated map. Just confirm the dates were saved.
 - Once recommended fields are collected (or skipped), call `get_feature_summary` to check `conflict_risk` before exporting. If any features have `conflict_risk: "red"` (confirmed geometry + date overlap), you MUST tell the user before calling `export_meti_geojson`: state clearly which fields conflict and with which source IDs. Then ask if they still want to export — some users proceed anyway for documentation purposes. If `conflict_risk: "yellow"` (geometry overlap but dates unconfirmed), mention it as a caution but do not block export. Only call `export_meti_geojson` after the user has acknowledged any red conflicts.
 - Be concise. Don't repeat the full field list after every message — just tell the user what's still needed.
 - If the user asks what any field means, call `explain_schema` with that field name.
@@ -224,6 +225,10 @@ def _tool_set_feature_metadata(session_id: str, feature_index: int, fields: dict
             f["meti_meta"] = {}
         f["meti_meta"].update(fields)
 
+    # Dates changed → cached risk results are stale; clear them
+    if "start_at" in fields or "end_at" in fields:
+        session.pop("risk_results", None)
+
     return {"updated": [f["id"] for f in targets], "fields_set": list(fields.keys())}
 
 
@@ -381,6 +386,16 @@ def chat_turn(session_id: str, user_message: str) -> Generator[str, None, None]:
         return
 
     session["messages"].append({"role": "user", "content": user_message})
+
+    # Keep history bounded to avoid rate limits. Trim from the front but
+    # only at a user-turn boundary so tool_use/tool_result pairs stay intact.
+    MAX_MESSAGES = 30
+    msgs = session["messages"]
+    if len(msgs) > MAX_MESSAGES:
+        trim_to = len(msgs) - MAX_MESSAGES
+        while trim_to < len(msgs) and msgs[trim_to].get("role") != "user":
+            trim_to += 1
+        session["messages"] = msgs[trim_to:]
 
     while True:
         response = client.messages.create(
