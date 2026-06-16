@@ -82,16 +82,44 @@ def check_intersection(
     return resp.json()
 
 
+def _parse_dt(value: Optional[str]):
+    """Parse an ISO 8601 date/datetime string; return None on failure."""
+    if not value:
+        return None
+    from datetime import datetime, timezone
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _dates_overlap(
+    feat_start: Optional[str], feat_end: Optional[str],
+    src_start: Optional[str],  src_end: Optional[str],
+) -> Optional[bool]:
+    """
+    True  → date ranges definitely overlap (confirmed conflict)
+    False → date ranges definitely do NOT overlap (no conflict)
+    None  → cannot determine (missing dates on either side)
+    """
+    fs, fe = _parse_dt(feat_start), _parse_dt(feat_end)
+    ss, se = _parse_dt(src_start),  _parse_dt(src_end)
+    if not fs or not fe or not ss or not se:
+        return None
+    return fs <= se and ss <= fe
+
+
 def check_conflicts_db(session_features: list) -> dict:
     """
     Check uploaded features against ALL sources via the Supabase RPC endpoint
     (find_intersecting_sources). Uses HTTPS + service key so it works outside
-    the VPC. The RPC runs ST_Intersects with a GiST index on the DB side.
+    the VPC. The RPC runs ST_Intersects with a GiST index on the DB side and
+    returns start_at/end_at so we can check temporal overlap too.
 
-    Returns a dict keyed by feature id:
-      { "risk": "green" | "red" | "yellow",
-        "conflict": bool,
-        "conflict_with": [source_id, ...] }
+    Risk logic:
+      green  = no spatial overlap, OR spatial overlap with confirmed non-overlapping dates
+      yellow = spatial overlap but dates missing → potential conflict
+      red    = spatial overlap AND date ranges confirmed overlapping → confirmed conflict
     """
     import json
     import logging
@@ -123,6 +151,9 @@ def check_conflicts_db(session_features: list) -> dict:
             result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": []}
             continue
 
+        feat_start = f.get("meti_meta", {}).get("start_at")
+        feat_end   = f.get("meti_meta", {}).get("end_at")
+
         try:
             resp = requests.post(
                 f"{supabase_url}/rest/v1/rpc/find_intersecting_sources",
@@ -135,12 +166,36 @@ def check_conflicts_db(session_features: list) -> dict:
                 result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": []}
                 continue
 
-            conflict_ids = [row["id"] for row in resp.json()]
+            spatial_matches = resp.json()
+
+            if not spatial_matches:
+                result[feature_id] = {"risk": "green", "conflict": False, "conflict_with": []}
+                continue
+
+            confirmed = []   # spatial + date overlap
+            potential = []   # spatial overlap, dates unknown/missing
+
+            for row in spatial_matches:
+                overlap = _dates_overlap(feat_start, feat_end, row.get("start_at"), row.get("end_at"))
+                if overlap is True:
+                    confirmed.append(row["id"])
+                elif overlap is None:
+                    potential.append(row["id"])
+                # overlap is False → different time period, not a conflict
+
+            if confirmed:
+                risk, conflict_ids = "red", confirmed
+            elif potential:
+                risk, conflict_ids = "yellow", potential
+            else:
+                risk, conflict_ids = "green", []
+
             result[feature_id] = {
-                "risk": "red" if conflict_ids else "green",
+                "risk": risk,
                 "conflict": bool(conflict_ids),
                 "conflict_with": conflict_ids,
             }
+
         except Exception as exc:
             log.error("check_conflicts_db: request failed for %s: %s", feature_id, exc)
             result[feature_id] = {"risk": "yellow", "conflict": None, "conflict_with": []}

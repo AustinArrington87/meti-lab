@@ -160,22 +160,28 @@ async function runRiskCheck() {
     const total = (s.green || 0) + (s.yellow || 0) + (s.red || 0);
     const lines = [`**Risk check complete** (${total} field${total !== 1 ? 's' : ''})`];
 
-    if ((s.green || 0) > 0)  lines.push(`- **${s.green} clear** (green) — no conflict detected`);
-    if ((s.red   || 0) > 0)  lines.push(`- **${s.red} conflict** (red) — overlaps an existing METI source`);
-    if ((s.yellow|| 0) > 0)  lines.push(`- **${s.yellow} unknown** (yellow) — conflict check unavailable`);
+    if ((s.green || 0) > 0)  lines.push(`- **${s.green} clear** (green) — no overlap with existing sources`);
+    if ((s.red   || 0) > 0)  lines.push(`- **${s.red} conflict** (red) — geometry and dates overlap an existing METI source`);
+    if ((s.yellow|| 0) > 0)  lines.push(`- **${s.yellow} potential** (yellow) — geometry overlaps an existing source, but dates not yet confirmed`);
 
     if (!data.has_dates) {
-      lines.push('\n_Note: start/end dates are not set yet. Conflict detection is most accurate once you provide the reporting period._');
+      lines.push('\n_Tip: provide start and end dates so the system can confirm or clear these potential conflicts._');
     }
 
-    if ((s.red || 0) > 0) {
-      const conflicts = Object.entries(riskMap)
-        .filter(([, v]) => v.risk === 'red')
-        .map(([id, v]) => {
-          const withIds = (v.conflict_with || []).join(', ') || 'unknown source';
-          return `  - **${id}** conflicts with: ${withIds}`;
-        }).join('\n');
-      lines.push('\n**Conflicting fields:**\n' + conflicts);
+    const redEntries    = Object.entries(riskMap).filter(([, v]) => v.risk === 'red');
+    const yellowEntries = Object.entries(riskMap).filter(([, v]) => v.risk === 'yellow' && (v.conflict_with || []).length);
+
+    if (redEntries.length) {
+      const rows = redEntries.map(([id, v]) =>
+        `  - **${id}** conflicts with: ${(v.conflict_with || []).join(', ') || 'unknown source'}`
+      ).join('\n');
+      lines.push('\n**Confirmed conflicts:**\n' + rows);
+    }
+    if (yellowEntries.length) {
+      const rows = yellowEntries.map(([id, v]) =>
+        `  - **${id}** overlaps: ${(v.conflict_with || []).join(', ') || 'unknown source'} _(dates unverified)_`
+      ).join('\n');
+      lines.push('\n**Potential conflicts (geometry only):**\n' + rows);
     }
 
     setMessageHtml('risk-checking', lines.join('\n'));
