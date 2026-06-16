@@ -54,7 +54,7 @@ Your job is to help users prepare their field boundary data for submission to th
   2. **attribute_type** — "What environmental attributes apply? Pick one or more: CARBON_REMOVAL, CARBON_AVOIDANCE, CI_SCORE, BIODIVERSITY, RENEWABLE_ENERGY, WATER_QUALITY, WATER_QUANTITY"
   3. **geometry_source** — "How was the boundary geometry created? Options: CUSTODIAN_DRAWN (farmer/operator drew it), AUTHORITATIVE_GIS (from a government dataset), EXTERNAL_REGISTRY (from a third-party registry)"
 - If the user skips any of these, save the rest and move on — do not block export on optional fields.
-- Once recommended fields are collected (or skipped), call `export_meti_geojson` and tell the user the export button is ready.
+- Once recommended fields are collected (or skipped), call `get_feature_summary` to check `conflict_risk` before exporting. If any features have `conflict_risk: "red"` (confirmed geometry + date overlap), you MUST tell the user before calling `export_meti_geojson`: state clearly which fields conflict and with which source IDs. Then ask if they still want to export — some users proceed anyway for documentation purposes. If `conflict_risk: "yellow"` (geometry overlap but dates unconfirmed), mention it as a caution but do not block export. Only call `export_meti_geojson` after the user has acknowledged any red conflicts.
 - Be concise. Don't repeat the full field list after every message — just tell the user what's still needed.
 - If the user asks what any field means, call `explain_schema` with that field name.
 """
@@ -150,11 +150,13 @@ def _tool_get_feature_summary(session_id: str) -> dict:
     if not session:
         return {"error": "Session not found"}
     features = session["features"]
+    risk_results = session.get("risk_results", {})
     summary = {
         "feature_count": len(features),
         "features": []
     }
     for f in features:
+        risk_info = risk_results.get(f["id"], {})
         entry = {
             "index": f["index"],
             "id": f["id"],
@@ -163,7 +165,9 @@ def _tool_get_feature_summary(session_id: str) -> dict:
             "crs_detected": f.get("crs_detected", "unknown"),
             "issues": f["issues"],
             "metadata_present": {k: v for k, v in f.get("meti_meta", {}).items() if v is not None},
-            "missing_required": []
+            "missing_required": [],
+            "conflict_risk": risk_info.get("risk", "unchecked"),
+            "conflict_with": risk_info.get("conflict_with", []),
         }
         meta = f.get("meti_meta", {})
         if not meta.get("start_at"):
@@ -275,10 +279,17 @@ def _tool_export_meti_geojson(session_id: str) -> dict:
     session["export_payload"] = meti_payload
     session["export_ready"] = True
 
+    # Return a lightweight summary — no raw geometry (saves tokens)
+    top_level_summary = {k: v for k, v in meti_payload.items() if k != "feature_collection"}
+    feature_summary = [
+        {"id": gf["id"], "start_at": gf["properties"]["start_at"], "end_at": gf["properties"]["end_at"]}
+        for gf in geo_features
+    ]
     return {
         "success": True,
         "feature_count": len(geo_features),
-        "payload_preview": meti_payload
+        "top_level_fields": top_level_summary,
+        "features": feature_summary,
     }
 
 

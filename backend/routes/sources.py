@@ -26,6 +26,9 @@ async def risk_check(session_id: str):
         session_features=session["features"],
     )
 
+    # Persist so the agent can see conflict status via get_feature_summary
+    session["risk_results"] = risk_map
+
     return {
         "risk_map": risk_map,
         "has_dates": has_dates,
