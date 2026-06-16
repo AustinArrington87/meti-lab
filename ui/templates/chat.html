@@ -42,7 +42,7 @@
       <span class="legend-dot conflict" style="display:none" id="leg-red"></span>
       <span id="leg-red-label" style="display:none"> Conflict </span>
       <span class="legend-dot unknown" style="display:none" id="leg-yellow"></span>
-      <span id="leg-yellow-label" style="display:none"> Unknown </span>
+      <span id="leg-yellow-label" style="display:none"> Medium Risk </span>
     </div>
   </div>
 
@@ -228,6 +228,28 @@ if (OPENING_MESSAGE) {
 // Auto-run risk check on load
 window.addEventListener('load', () => runRiskCheck());
 
+// Silent re-check: updates map + legend without a full chat summary
+async function silentRiskCheck() {
+  try {
+    const resp = await fetch('/risk-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID })
+    });
+    const data = await resp.json();
+    if (data.risk_map) {
+      Object.entries(data.risk_map).forEach(([id, info]) => applyRiskToMap(id, info.risk));
+      updateLegend();
+      const s = data.summary || {};
+      const parts = [];
+      if (s.red)    parts.push(`${s.red} conflict`);
+      if (s.yellow) parts.push(`${s.yellow} potential`);
+      if (s.green)  parts.push(`${s.green} clear`);
+      appendMessage('agent', `Risk updated: ${parts.join(', ') || 'all clear'}.`);
+    }
+  } catch (_) {}
+}
+
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
@@ -275,6 +297,7 @@ function sendMessage() {
               setMessageHtml(replyId, buffer);
             } else if (parsed.type === 'done') {
               if (parsed.export_ready) document.getElementById('export-btn').style.display = 'inline-block';
+              if (parsed.dates_updated) silentRiskCheck();
               sendBtn.disabled = false; inputEl.disabled = false; inputEl.focus();
             } else if (parsed.type === 'error') {
               buffer += '\n\nError: ' + parsed.content;

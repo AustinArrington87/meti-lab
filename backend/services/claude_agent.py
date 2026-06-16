@@ -414,6 +414,11 @@ def chat_turn(session_id: str, user_message: str) -> Generator[str, None, None]:
             # Signal export readiness via a special marker
             if tool_block.name == "export_meti_geojson" and result.get("success"):
                 session["export_ready"] = True
+            # Signal that dates changed so the frontend can re-run the risk check
+            if tool_block.name == "set_feature_metadata":
+                fields = tool_block.input.get("fields", {})
+                if "start_at" in fields or "end_at" in fields:
+                    session["dates_updated"] = True
 
         session["messages"].append({"role": "user", "content": tool_results})
         # Continue loop so model can respond to tool results
@@ -430,3 +435,12 @@ def get_export_payload(session_id: str) -> Optional[dict]:
 def is_export_ready(session_id: str) -> bool:
     session = _sessions.get(session_id)
     return bool(session and session.get("export_ready"))
+
+
+def pop_dates_updated(session_id: str) -> bool:
+    """Return True (and reset the flag) if dates were set during the last turn."""
+    session = _sessions.get(session_id)
+    if not session:
+        return False
+    updated = session.pop("dates_updated", False)
+    return bool(updated)

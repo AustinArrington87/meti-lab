@@ -20,8 +20,9 @@ async def chat(request: ChatRequest):
                 data = json.dumps({"type": "text", "content": chunk})
                 yield f"data: {data}\n\n"
 
-            export_ready = claude_agent.is_export_ready(session_id)
-            yield f"data: {json.dumps({'type': 'done', 'export_ready': export_ready})}\n\n"
+            export_ready   = claude_agent.is_export_ready(session_id)
+            dates_updated  = claude_agent.pop_dates_updated(session_id)
+            yield f"data: {json.dumps({'type': 'done', 'export_ready': export_ready, 'dates_updated': dates_updated})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
 
