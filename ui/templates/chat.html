@@ -317,8 +317,31 @@ function sendMessage() {
   });
 }
 
-function exportFile() {
-  window.location.href = `/export/${SESSION_ID}`;
+async function exportFile() {
+  const btn = document.getElementById('export-btn');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Preparing…';
+  try {
+    const resp = await fetch(`/export/${SESSION_ID}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      appendMessage('agent', `Export failed: ${err.error || resp.statusText}`);
+      return;
+    }
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `meti_${SESSION_ID.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    appendMessage('agent', `Export failed: ${err}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
 }
 </script>
 {% endblock %}

@@ -229,6 +229,16 @@ def _tool_set_feature_metadata(session_id: str, feature_index: int, fields: dict
     if "start_at" in fields or "end_at" in fields:
         session.pop("risk_results", None)
 
+    # Auto-regenerate export payload if all required fields are now present
+    all_ready = all(
+        f.get("meti_meta", {}).get("start_at")
+        and f.get("meti_meta", {}).get("end_at")
+        and f.get("geometry")
+        for f in session["features"]
+    )
+    if all_ready:
+        _tool_export_meti_geojson(session_id)
+
     return {"updated": [f["id"] for f in targets], "fields_set": list(fields.keys())}
 
 
