@@ -17,6 +17,9 @@
       <button id="risk-btn" class="btn-risk" onclick="runRiskCheck()" title="Check for conflicts with existing METI sources">
         Check Risk
       </button>
+      <button id="insights-btn" class="btn-insights" onclick="runInsights()" title="Fetch UFFDA land use, soil, and climate data for carbon market eligibility screening">
+        Get Insights
+      </button>
       <button id="export-btn" class="btn-export" style="display:none" onclick="exportFile()">
         Export METI GeoJSON
       </button>
@@ -191,6 +194,122 @@ async function runRiskCheck() {
   } catch (err) {
     setMessageHtml('risk-checking', `Network error during risk check: ${err}`);
     btn.textContent = 'Check Risk';
+    btn.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Insights
+// ---------------------------------------------------------------------------
+async function runInsights() {
+  const btn = document.getElementById('insights-btn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+
+  appendMessage('agent',
+    'Fetching UFFDA field data (land cover, soil, drought, crop history, protected areas)… this may take 15–45 seconds.',
+    'insights-fetching'
+  );
+
+  try {
+    const resp = await fetch('/insights/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID })
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      setMessageHtml('insights-fetching', `Insights fetch failed: ${data.error}`);
+      btn.textContent = 'Get Insights';
+      btn.disabled = false;
+      return;
+    }
+
+    const scored = data.scored || [];
+    const lines = [];
+
+    lines.push('**Field Insights — Ecosystem Services Screening**');
+    lines.push('');
+    lines.push(`${scored.length} field${scored.length !== 1 ? 's' : ''} analyzed via UFFDA enrichment.`);
+    lines.push('');
+
+    // Per-field soil / land table (no scores)
+    lines.push('| Field | Land Cover | SOM | pH | Irrigation |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    for (const s of scored) {
+      const som = s.som != null ? s.som.toFixed(2) + '%' : '—';
+      const ph = s.ph != null ? s.ph.toFixed(1) : '—';
+      const lc = s.land_cover || '—';
+      const irr = s.irrigation || '—';
+      lines.push(`| ${s.id} | ${lc} | ${som} | ${ph} | ${irr} |`);
+    }
+    lines.push('');
+
+    // CDL crop history table (current year + 4 prior)
+    const allYears = new Set();
+    for (const s of scored) {
+      for (const h of (s.crop_history || [])) {
+        if (h.year) allYears.add(h.year);
+      }
+    }
+    const cdlYears = Array.from(allYears).sort();
+    if (cdlYears.length > 0) {
+      const currentCdlYear = cdlYears[cdlYears.length - 1];
+      lines.push('**Cropland Data Layer (CDL) — 5-year History**');
+      lines.push('');
+      lines.push('| Field | ' + cdlYears.join(' | ') + ' |');
+      lines.push('| --- |' + cdlYears.map(() => ' --- |').join(''));
+
+      const baselineMatches = [];
+      for (const s of scored) {
+        const byYear = {};
+        for (const h of (s.crop_history || [])) { byYear[h.year] = h.crop || '—'; }
+        const cells = cdlYears.map(y => byYear[y] || '—');
+        lines.push(`| ${s.id} | ${cells.join(' | ')} |`);
+
+        // Note if current-year crop also appears in any prior year (rotation baseline)
+        const currentCrop = byYear[currentCdlYear];
+        const priorMatch = currentCrop && cdlYears
+          .filter(y => y < currentCdlYear)
+          .find(y => byYear[y] === currentCrop);
+        if (currentCrop && priorMatch) {
+          baselineMatches.push(`**${s.id}** (${currentCrop} also in ${priorMatch})`);
+        }
+      }
+      lines.push('');
+
+      if (baselineMatches.length > 0) {
+        lines.push(`*Historical baseline match — same crop as ${currentCdlYear}: ${baselineMatches.join(', ')}*`);
+        lines.push('');
+      }
+    }
+
+    // Carbon market candidates — SOM, pH, irrigation only, no numeric score
+    const carbonHigh = scored.filter(s => s.programs && s.programs.soil_carbon && s.programs.soil_carbon.score >= 60);
+    if (carbonHigh.length > 0) {
+      lines.push('**Carbon Market Candidates (Soil Carbon)**');
+      lines.push('');
+      for (const s of carbonHigh) {
+        const sc = s.programs.soil_carbon;
+        const som = s.som != null ? `SOM ${s.som.toFixed(2)}%` : null;
+        const ph = s.ph != null ? `pH ${s.ph.toFixed(1)}` : null;
+        const irr = s.irrigation || null;
+        const attrs = [som, ph, irr].filter(Boolean).join(', ');
+        lines.push(`- **${s.id}** — ${sc.rating}${attrs ? ' — ' + attrs : ''}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('*Ask the agent to discuss specific fields or carbon market fit.*');
+
+    setMessageHtml('insights-fetching', lines.join('\n'));
+    btn.textContent = 'Re-run Insights';
+    btn.disabled = false;
+
+  } catch (err) {
+    setMessageHtml('insights-fetching', `Network error during insights fetch: ${err}`);
+    btn.textContent = 'Get Insights';
     btn.disabled = false;
   }
 }

@@ -262,6 +262,30 @@ def chat():
 # Risk check
 # ---------------------------------------------------------------------------
 
+@app.route("/insights/enrich", methods=["POST"])
+@requires_auth
+def insights_enrich():
+    body = request.get_json()
+    session_id = body.get("session_id") or session.get("session_id")
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/api/insights/enrich",
+            params={"session_id": session_id},
+            headers=_account_headers(),
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except requests.RequestException as exc:
+        try:
+            detail = exc.response.json().get("detail", str(exc))
+        except Exception:
+            detail = str(exc)
+        return jsonify({"error": detail}), 500
+
+
 @app.route("/risk-check", methods=["POST"])
 @requires_auth
 def risk_check():

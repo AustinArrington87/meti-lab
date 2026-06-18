@@ -58,6 +58,20 @@ Your job is to help users prepare their field boundary data for submission to th
 - Once recommended fields are collected (or skipped), call `get_feature_summary` to check `conflict_risk` before exporting. If any features have `conflict_risk: "red"` (confirmed geometry + date overlap), you MUST tell the user before calling `export_meti_geojson`: state clearly which fields conflict and with which source IDs. Then ask if they still want to export — some users proceed anyway for documentation purposes. If `conflict_risk: "yellow"` (geometry overlap but dates unconfirmed), mention it as a caution but do not block export. Only call `export_meti_geojson` after the user has acknowledged any red conflicts.
 - Be concise. Don't repeat the full field list after every message — just tell the user what's still needed.
 - If the user asks what any field means, call `explain_schema` with that field name.
+
+## Field Insights (UFFDA Enrichment)
+You can call `get_field_insights` to access environmental enrichment data and ecosystem-services scores for each field. This data is fetched via UFFDA and covers: land cover (CDL), soil organic matter, pH, drought status (USDM), crop history, irrigation regime, and protected area overlap.
+
+Each field is scored 0–100 for four program archetypes:
+- **Soil Carbon Sequestration (Cropland)**: High scores (≥60) indicate active cropland with room to build soil organic matter — strong candidate for programs like ESMC, Soil & Water Outcomes Fund, or voluntary carbon markets.
+- **Grassland Conservation & Avoided Conversion**: High scores indicate intact grassland/pasture under conversion pressure — relevant for ACR or CAR grassland protocols.
+- **Water & Drought Resilience**: High scores indicate drought-stressed fields with vulnerable soils — relevant for water quality/resilience programs.
+- **Biodiversity & Habitat Connectivity**: High scores indicate natural cover diversity near protected lands.
+
+Ratings: Excellent ≥ 80, High ≥ 60, Moderate ≥ 40, Low < 40.
+Scores are a **screening heuristic** for triage — not a registry-level eligibility determination.
+When discussing carbon market fit, cite the specific score and key drivers (e.g., "SOM at 1.8% means high carbon headroom").
+If `get_field_insights` returns `status: not_fetched`, tell the user to click the "Get Insights" button to fetch UFFDA data first.
 """
 
 # session_id is intentionally absent from all tool schemas —
@@ -123,6 +137,15 @@ TOOLS = [
                 }
             },
             "required": ["field_name"]
+        }
+    },
+    {
+        "name": "get_field_insights",
+        "description": "Return UFFDA enrichment data and ecosystem-services program scores for all fields. Requires the user to have clicked 'Get Insights' first. Returns land cover, soil organic matter, pH, drought status, and carbon market eligibility scores (0-100) for each field.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
     }
 ]
@@ -308,6 +331,16 @@ def _tool_export_meti_geojson(session_id: str) -> dict:
     }
 
 
+def _tool_get_field_insights(session_id: str) -> dict:
+    session = _sessions.get(session_id)
+    if not session:
+        return {"error": "Session not found"}
+    results = session.get("enrichment_results")
+    if not results:
+        return {"status": "not_fetched", "message": "Click 'Get Insights' to fetch UFFDA enrichment data."}
+    return {"status": "ok", "scored": results["scored"]}
+
+
 def _tool_explain_schema(field_name: str) -> dict:
     explanation = FIELD_EXPLANATIONS.get(field_name.lower())
     if explanation:
@@ -330,6 +363,8 @@ def _dispatch_tool(tool_name: str, tool_input: dict, session_id: str) -> Any:
         return _tool_export_meti_geojson(session_id)
     if tool_name == "explain_schema":
         return _tool_explain_schema(**tool_input)
+    if tool_name == "get_field_insights":
+        return _tool_get_field_insights(session_id)
     return {"error": f"Unknown tool: {tool_name}"}
 
 

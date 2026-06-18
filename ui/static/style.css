@@ -89,6 +89,9 @@ main { flex: 1; overflow: hidden; }
 .btn-risk { padding: 5px 11px; background: var(--white); color: var(--gray-600); border: 1px solid var(--gray-200); border-radius: var(--radius); font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .btn-risk:hover:not(:disabled) { border-color: var(--gray-400); color: var(--gray-800); }
 .btn-risk:disabled { opacity: .5; cursor: not-allowed; }
+.btn-insights { padding: 5px 11px; background: var(--white); color: #6d28d9; border: 1px solid #ddd6fe; border-radius: var(--radius); font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.btn-insights:hover:not(:disabled) { border-color: #a78bfa; background: #f5f3ff; }
+.btn-insights:disabled { opacity: .5; cursor: wait; animation: pulse-btn 1s ease-in-out infinite; }
 
 /* Map panel */
 .map-panel { position: relative; }

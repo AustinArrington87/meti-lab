@@ -28,6 +28,8 @@ class Settings:
     # Admin M2M credentials (full access — all accounts)
     meti_client_id: str
     meti_client_secret: str
+    # UFFDA enrichment client identifier
+    uffda_client_id: str = "millpont-austin-2026"
     # Per-account M2M credentials keyed by account_id
     account_credentials: dict = field(default_factory=dict)
 
@@ -99,6 +101,7 @@ def get_settings() -> Settings:
         supabase_service_key=os.environ.get("SUPABASE_SERVICE_KEY", ""),
         meti_client_id=os.environ.get("METI_CLIENT_ID", ""),
         meti_client_secret=os.environ.get("METI_CLIENT_SECRET", ""),
+        uffda_client_id=os.environ.get("UFFDA_CLIENT_ID", "millpont-austin-2026"),
         account_credentials=account_credentials,
     )
 
