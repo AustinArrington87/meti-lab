@@ -54,8 +54,11 @@ Your job is to help users prepare their field boundary data for submission to th
   2. **attribute_type** — "What environmental attributes apply? Pick one or more: CARBON_REMOVAL, CARBON_AVOIDANCE, CI_SCORE, BIODIVERSITY, RENEWABLE_ENERGY, WATER_QUALITY, WATER_QUANTITY"
   3. **geometry_source** — "How was the boundary geometry created? Options: CUSTODIAN_DRAWN (farmer/operator drew it), AUTHORITATIVE_GIS (from a government dataset), EXTERNAL_REGISTRY (from a third-party registry)"
 - If the user skips any of these, save the rest and move on — do not block export on optional fields.
-- After updating `start_at` or `end_at`, DO NOT claim any risk status (green/red/yellow) — the UI re-runs the risk check automatically and the user will see the updated map. Just confirm the dates were saved.
-- Once recommended fields are collected (or skipped), call `get_feature_summary` to check `conflict_risk` before exporting. If any features have `conflict_risk: "red"` (confirmed geometry + date overlap), you MUST tell the user before calling `export_meti_geojson`: state clearly which fields conflict and with which source IDs. Then ask if they still want to export — some users proceed anyway for documentation purposes. If `conflict_risk: "yellow"` (geometry overlap but dates unconfirmed), mention it as a caution but do not block export. Only call `export_meti_geojson` after the user has acknowledged any red conflicts.
+- After setting or updating `start_at` or `end_at`, call `check_spatial_conflicts` to get fresh conflict data. Do NOT claim any risk status before running it.
+- Once recommended fields are collected (or skipped), call `check_spatial_conflicts` then report the results. If any features have `risk: "red"` (confirmed geometry + date overlap), you MUST tell the user before calling `export_meti_geojson`: state clearly which fields conflict and with which source IDs. Then ask if they still want to export. If `risk: "yellow"` (spatial overlap, dates unknown), mention it as a caution but do not block export. Only call `export_meti_geojson` after the user has acknowledged any red conflicts.
+
+## Spatial Checks
+All geometry is stored and processed server-side — it is never passed to you directly. To check whether uploaded boundaries conflict with existing METI sources, call `check_spatial_conflicts`. This runs a PostGIS ST_Intersects query plus temporal overlap detection and returns only risk metadata (green/yellow/red per feature, plus conflicting source IDs). No coordinate data is included in the result.
 - Be concise. Don't repeat the full field list after every message — just tell the user what's still needed.
 - If the user asks what any field means, call `explain_schema` with that field name.
 
@@ -79,7 +82,7 @@ If `get_field_insights` returns `status: not_fetched`, tell the user to click th
 TOOLS = [
     {
         "name": "get_feature_summary",
-        "description": "Get a summary of the uploaded features: count, geometry types, detected issues, and which METI fields are still missing.",
+        "description": "Get a summary of uploaded features: count, geometry types, detected issues, missing METI fields, and last-known conflict risk (use check_spatial_conflicts for a fresh check).",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -142,6 +145,15 @@ TOOLS = [
     {
         "name": "get_field_insights",
         "description": "Return UFFDA enrichment data and ecosystem-services program scores for all fields. Requires the user to have clicked 'Get Insights' first. Returns land cover, soil organic matter, pH, drought status, and carbon market eligibility scores (0-100) for each field.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "check_spatial_conflicts",
+        "description": "Run a PostGIS spatial + temporal overlap check against the METI source ledger for all uploaded features. Returns per-feature risk status only — no geometry is included. Call this after setting start_at/end_at dates, or any time you need current conflict data before exporting.",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -341,6 +353,41 @@ def _tool_get_field_insights(session_id: str) -> dict:
     return {"status": "ok", "scored": results["scored"]}
 
 
+def _tool_check_spatial_conflicts(session_id: str) -> dict:
+    from backend.services import meti_client
+    session = _sessions.get(session_id)
+    if not session:
+        return {"error": "Session not found"}
+
+    risk_map = meti_client.check_conflicts_db(session_features=session["features"])
+    session["risk_results"] = risk_map
+
+    # Return only risk metadata — geometry stays server-side
+    return {
+        "risk_map": {
+            fid: {
+                "risk": info["risk"],
+                "conflict_with": info.get("conflict_with", []),
+            }
+            for fid, info in risk_map.items()
+        },
+        "summary": {
+            "green": sum(1 for v in risk_map.values() if v["risk"] == "green"),
+            "yellow": sum(1 for v in risk_map.values() if v["risk"] == "yellow"),
+            "red": sum(1 for v in risk_map.values() if v["risk"] == "red"),
+        },
+    }
+
+
+def _strip_geometry(obj: Any) -> Any:
+    """Recursively remove 'geometry' keys from tool results — coordinate arrays never reach the Claude API."""
+    if isinstance(obj, dict):
+        return {k: _strip_geometry(v) for k, v in obj.items() if k != "geometry"}
+    if isinstance(obj, list):
+        return [_strip_geometry(item) for item in obj]
+    return obj
+
+
 def _tool_explain_schema(field_name: str) -> dict:
     explanation = FIELD_EXPLANATIONS.get(field_name.lower())
     if explanation:
@@ -352,20 +399,25 @@ def _tool_explain_schema(field_name: str) -> dict:
 
 
 def _dispatch_tool(tool_name: str, tool_input: dict, session_id: str) -> Any:
-    """Dispatch a tool call, injecting session_id so the agent never needs to provide it."""
+    """Dispatch a tool call, injecting session_id. All results pass through _strip_geometry
+    so coordinate arrays can never accidentally reach the Claude API."""
     if tool_name == "get_feature_summary":
-        return _tool_get_feature_summary(session_id)
-    if tool_name == "fix_geometry":
-        return _tool_fix_geometry(session_id, **tool_input)
-    if tool_name == "set_feature_metadata":
-        return _tool_set_feature_metadata(session_id, **tool_input)
-    if tool_name == "export_meti_geojson":
-        return _tool_export_meti_geojson(session_id)
-    if tool_name == "explain_schema":
-        return _tool_explain_schema(**tool_input)
-    if tool_name == "get_field_insights":
-        return _tool_get_field_insights(session_id)
-    return {"error": f"Unknown tool: {tool_name}"}
+        result = _tool_get_feature_summary(session_id)
+    elif tool_name == "fix_geometry":
+        result = _tool_fix_geometry(session_id, **tool_input)
+    elif tool_name == "set_feature_metadata":
+        result = _tool_set_feature_metadata(session_id, **tool_input)
+    elif tool_name == "export_meti_geojson":
+        result = _tool_export_meti_geojson(session_id)
+    elif tool_name == "explain_schema":
+        result = _tool_explain_schema(**tool_input)
+    elif tool_name == "get_field_insights":
+        result = _tool_get_field_insights(session_id)
+    elif tool_name == "check_spatial_conflicts":
+        result = _tool_check_spatial_conflicts(session_id)
+    else:
+        result = {"error": f"Unknown tool: {tool_name}"}
+    return _strip_geometry(result)
 
 
 def init_session(
