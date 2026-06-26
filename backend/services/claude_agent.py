@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Any, Generator, List, Optional
 
 import anthropic
@@ -495,13 +496,35 @@ def chat_turn(session_id: str, user_message: str) -> Generator[str, None, None]:
         session["messages"] = msgs[trim_to:]
 
     while True:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=session["messages"],
-        )
+        for _attempt in range(2):
+            try:
+                response = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    tools=TOOLS,
+                    messages=session["messages"],
+                )
+                break  # success — exit retry loop
+            except anthropic.RateLimitError as exc:
+                if _attempt == 1:
+                    yield "\n\nI've hit the API rate limit and couldn't recover. Please wait a minute and send your message again."
+                    return
+                wait = 60
+                try:
+                    wait = int(exc.response.headers.get("retry-after", 60))
+                except Exception:
+                    pass
+                yield f"\n\n*Rate limit reached — retrying in {wait}s…*"
+                time.sleep(wait)
+            except anthropic.APIStatusError as exc:
+                yield f"\n\nThe AI service returned an error (HTTP {exc.status_code}). Please try again."
+                return
+            except anthropic.APIError:
+                yield "\n\nCouldn't reach the AI service. Please try again."
+                return
+        else:
+            return  # both attempts exhausted
 
         # Collect assistant content blocks
         assistant_content = []

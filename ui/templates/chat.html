@@ -419,7 +419,8 @@ function sendMessage() {
               if (parsed.dates_updated) silentRiskCheck();
               sendBtn.disabled = false; inputEl.disabled = false; inputEl.focus();
             } else if (parsed.type === 'error') {
-              buffer += '\n\nError: ' + parsed.content;
+              console.error('Agent error:', parsed.content);
+              buffer += '\n\nSomething went wrong — please try again.';
               setMessageHtml(replyId, buffer);
               sendBtn.disabled = false; inputEl.disabled = false;
             }
