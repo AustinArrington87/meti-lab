@@ -4,9 +4,6 @@
 # Usage:
 #   ./deploy.sh                    # deploy all commits since last deploy
 #   ./deploy.sh file1 file2 ...    # deploy specific files
-#
-# Tracks the last deployed commit in .deployed_commit so it can diff against
-# the current HEAD and deploy only what changed between commits.
 
 set -e
 
@@ -26,20 +23,23 @@ else
   if [ -f "$TRACKING_FILE" ]; then
     LAST=$(cat "$TRACKING_FILE")
     if [ "$LAST" = "$CURRENT" ]; then
-      echo "Already deployed at $CURRENT — nothing new to deploy."
+      echo "Already deployed at ${CURRENT:0:8} — nothing new to deploy."
       echo "Run: ./deploy.sh file1 file2 ... to deploy specific files."
       exit 0
     fi
-    echo "Deploying changes since $LAST..."
-    mapfile -t FILES < <(git diff --name-only "$LAST" "$CURRENT" | grep -v '\.env' || true)
+    echo "Deploying changes since ${LAST:0:8}..."
+    while IFS= read -r line; do
+      [ -n "$line" ] && FILES+=("$line")
+    done < <(git diff --name-only "$LAST" "$CURRENT" | grep -v '\.env' || true)
     # Also include any uncommitted working-tree changes
-    mapfile -t DIRTY < <(git diff --name-only HEAD | grep -v '\.env' || true)
-    FILES=("${FILES[@]}" "${DIRTY[@]}")
+    while IFS= read -r line; do
+      [ -n "$line" ] && FILES+=("$line")
+    done < <(git diff --name-only HEAD | grep -v '\.env' || true)
   else
     echo "No prior deploy tracked — deploying all uncommitted changes..."
-    mapfile -t FILES < <(git diff --name-only HEAD | grep -v '\.env' || true)
-    mapfile -t UNTRACKED < <(git ls-files --others --exclude-standard | grep -v '\.env' || true)
-    FILES=("${FILES[@]}" "${UNTRACKED[@]}")
+    while IFS= read -r line; do
+      [ -n "$line" ] && FILES+=("$line")
+    done < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | grep -v '\.env' || true)
   fi
 
   if [ "${#FILES[@]}" -eq 0 ]; then
