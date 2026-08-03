@@ -20,6 +20,11 @@
       <button id="insights-btn" class="btn-insights" onclick="runInsights()" title="Fetch UFFDA land use, soil, and climate data for carbon market eligibility screening">
         Get Insights
       </button>
+      {% if feature_count > 20 %}
+      <span class="insights-limit-notice" title="Get Insights works with up to 20 fields. This file has {{ feature_count }} — split it into smaller uploads to use enrichment.">
+        ⚠ {{ feature_count }} fields — Insights limited to 20
+      </span>
+      {% endif %}
       <button id="export-btn" class="btn-export" style="display:none" onclick="exportFile()">
         Export METI GeoJSON
       </button>
@@ -53,6 +58,8 @@
 
 <script>
 const SESSION_ID = "{{ session_id }}";
+const FEATURE_COUNT = {{ feature_count }};
+const INSIGHTS_MAX_FEATURES = 20;
 const FEATURES = {{ features | tojson }};
 const OPENING_MESSAGE = {{ opening_message | tojson }};
 
@@ -147,7 +154,7 @@ async function runRiskCheck() {
     if (data.error) {
       setMessageHtml('risk-checking', `Risk check failed: ${data.error}`);
       btn.textContent = 'Check Risk';
-      btn.disabled = false;
+      btn.disabled = false; btn.classList.remove('fetching');
       return;
     }
 
@@ -201,9 +208,30 @@ async function runRiskCheck() {
 // ---------------------------------------------------------------------------
 // Insights
 // ---------------------------------------------------------------------------
+
+// Disable the button immediately on page load if over the feature limit
+if (FEATURE_COUNT > INSIGHTS_MAX_FEATURES) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('insights-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.title = `Get Insights supports up to ${INSIGHTS_MAX_FEATURES} fields. This file has ${FEATURE_COUNT} — split into smaller uploads to use enrichment.`;
+    }
+  });
+}
+
 async function runInsights() {
+  if (FEATURE_COUNT > INSIGHTS_MAX_FEATURES) {
+    appendMessage('agent',
+      `**Get Insights is not available for this file.** It supports up to ${INSIGHTS_MAX_FEATURES} fields, but this file has ${FEATURE_COUNT}. ` +
+      `Split it into smaller uploads of ${INSIGHTS_MAX_FEATURES} or fewer fields to use enrichment.`
+    );
+    return;
+  }
+
   const btn = document.getElementById('insights-btn');
   btn.disabled = true;
+  btn.classList.add('fetching');
   btn.textContent = 'Fetching…';
 
   appendMessage('agent',
@@ -227,7 +255,7 @@ async function runInsights() {
         : `Server error (HTTP ${resp.status}). Please try again.`;
       setMessageHtml('insights-fetching', statusMsg);
       btn.textContent = 'Get Insights';
-      btn.disabled = false;
+      btn.disabled = false; btn.classList.remove('fetching');
       return;
     }
 
@@ -235,7 +263,7 @@ async function runInsights() {
       const msg = data.error || data.detail || `Server error (HTTP ${resp.status}).`;
       setMessageHtml('insights-fetching', `**Insights unavailable:** ${msg}`);
       btn.textContent = 'Get Insights';
-      btn.disabled = false;
+      btn.disabled = false; btn.classList.remove('fetching');
       return;
     }
 
@@ -247,7 +275,7 @@ async function runInsights() {
         'If the problem persists, try uploading fewer fields.'
       );
       btn.textContent = 'Try Again';
-      btn.disabled = false;
+      btn.disabled = false; btn.classList.remove('fetching');
       return;
     }
 
