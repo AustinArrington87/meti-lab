@@ -83,9 +83,23 @@ function renderMarkdown(text) {
 // Map
 // ---------------------------------------------------------------------------
 const map = L.map('map', { zoomControl: true });
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap contributors'
-}).addTo(map);
+
+const basemaps = {
+  'Satellite': L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri &mdash; Esri, USDA, USGS, AEX, GeoEye, IGN', maxZoom: 19 }
+  ),
+  'Street': L.tileLayer(
+    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }
+  ),
+  'Topo': L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 19 }
+  ),
+};
+basemaps['Satellite'].addTo(map);
+L.control.layers(basemaps, {}, { position: 'topright', collapsed: false }).addTo(map);
 
 const featureLayers = {};  // feature_id → Leaflet layer
 const allBounds = [];
