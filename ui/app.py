@@ -274,7 +274,7 @@ def insights_enrich():
             f"{BACKEND_URL}/api/insights/enrich",
             params={"session_id": session_id},
             headers=_account_headers(),
-            timeout=120,
+            timeout=150,
         )
         resp.raise_for_status()
         return jsonify(resp.json())

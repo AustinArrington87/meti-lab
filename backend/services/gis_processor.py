@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import os
 import tempfile
 import uuid
@@ -17,6 +18,13 @@ from shapely.validation import make_valid
 # Enable KML driver
 fiona.drvsupport.supported_drivers["KML"] = "rw"
 fiona.drvsupport.supported_drivers["LIBKML"] = "rw"
+
+# Fiona KML driver injects these columns for every file; they're always empty/NaT/NaN
+# and are not JSON-serializable, so strip them before building feature properties.
+_KML_ARTIFACT_COLS = frozenset({
+    "timestamp", "begin", "end", "altitudeMode",
+    "tessellate", "extrude", "visibility", "drawOrder", "icon",
+})
 
 SUPPORTED_EXTENSIONS = {".geojson", ".json", ".kml", ".shp", ".gpx", ".gml", ".zip"}
 
@@ -179,12 +187,24 @@ def parse_file(file_bytes: bytes, filename: str) -> List[dict]:
         # Build properties from non-geometry columns
         props = {}
         for col in gdf.columns:
-            if col in {"geometry", "_source_file"}:
+            if col in {"geometry", "_source_file"} or col in _KML_ARTIFACT_COLS:
                 continue
             val = row[col]
+            # Unwrap numpy scalars
             if hasattr(val, "item"):
                 val = val.item()
-            props[col] = val if val is not None else None
+            # pandas NaT / NaN are not JSON-serializable — coerce to None
+            if val is not None:
+                try:
+                    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                        val = None
+                    elif hasattr(val, "isoformat"):
+                        val = val.isoformat()
+                    elif str(type(val)) in ("<class 'pandas._libs.tslibs.nattype.NaTType'>",):
+                        val = None
+                except Exception:
+                    val = str(val) if val is not None else None
+            props[col] = val
 
         # Feature id: prefer explicit id/fid, then shapefile stem, then index
         source_stem = row.get("_source_file") if "_source_file" in gdf.columns else None
