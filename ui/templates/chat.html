@@ -217,21 +217,52 @@ async function runInsights() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: SESSION_ID })
     });
-    const data = await resp.json();
 
-    if (data.error) {
-      setMessageHtml('insights-fetching', `Insights fetch failed: ${data.error}`);
+    let data;
+    try {
+      data = await resp.json();
+    } catch (_) {
+      const statusMsg = resp.status === 504
+        ? 'The enrichment request timed out — try again with fewer fields (10 or fewer work best).'
+        : `Server error (HTTP ${resp.status}). Please try again.`;
+      setMessageHtml('insights-fetching', statusMsg);
+      btn.textContent = 'Get Insights';
+      btn.disabled = false;
+      return;
+    }
+
+    if (!resp.ok || data.error) {
+      const msg = data.error || data.detail || `Server error (HTTP ${resp.status}).`;
+      setMessageHtml('insights-fetching', `**Insights unavailable:** ${msg}`);
       btn.textContent = 'Get Insights';
       btn.disabled = false;
       return;
     }
 
     const scored = data.scored || [];
+
+    if (scored.length === 0) {
+      setMessageHtml('insights-fetching',
+        '**No enrichment data returned.** UFFDA may be temporarily unavailable — please try again in a minute. ' +
+        'If the problem persists, try uploading fewer fields.'
+      );
+      btn.textContent = 'Try Again';
+      btn.disabled = false;
+      return;
+    }
+
     const lines = [];
 
     lines.push('**Field Insights — Ecosystem Services Screening**');
     lines.push('');
-    lines.push(`${scored.length} field${scored.length !== 1 ? 's' : ''} analyzed via UFFDA enrichment.`);
+
+    // Surface partial failure warning
+    if (data.warning) {
+      lines.push(`> ⚠ ${data.warning}`);
+      lines.push('');
+    }
+
+    lines.push(`${scored.length} of ${data.feature_count} field${data.feature_count !== 1 ? 's' : ''} enriched via UFFDA.`);
     lines.push('');
 
     // Per-field soil / land table (no scores)
@@ -308,7 +339,9 @@ async function runInsights() {
     btn.disabled = false;
 
   } catch (err) {
-    setMessageHtml('insights-fetching', `Network error during insights fetch: ${err}`);
+    setMessageHtml('insights-fetching',
+      'Could not reach the server during insights fetch. Check your connection and try again.'
+    );
     btn.textContent = 'Get Insights';
     btn.disabled = false;
   }

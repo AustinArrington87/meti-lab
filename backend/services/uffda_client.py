@@ -67,7 +67,9 @@ def _build_payload(features: list, year: int, layers: list) -> dict:
 
 def _post_batch(payload: dict, headers: dict, label: str) -> Optional[dict]:
     max_attempts = 5
+    max_rate_limit_retries = 3
     attempts = 0
+    rate_limit_hits = 0
     while attempts < max_attempts:
         try:
             resp = requests.post(UFFDA_API_URL, json=payload, headers=headers, timeout=35)
@@ -84,9 +86,12 @@ def _post_batch(payload: dict, headers: dict, label: str) -> Optional[dict]:
             return resp.json()
 
         if resp.status_code == 429:
+            rate_limit_hits += 1
+            if rate_limit_hits > max_rate_limit_retries:
+                return None
             retry_after = int(resp.headers.get("Retry-After", 60))
             time.sleep(retry_after)
-            continue  # not counted against attempts
+            continue  # rate limit hits not counted against normal attempts
 
         if resp.status_code in (504, 546):
             attempts += 1
@@ -99,24 +104,26 @@ def _post_batch(payload: dict, headers: dict, label: str) -> Optional[dict]:
     return None
 
 
-def enrich_features(features: list, uffda_client_id: str) -> list:
+def enrich_features(features: list, uffda_client_id: str) -> dict:
     """
     Call UFFDA /v1/fields/enrich for all features across all layer groups.
     features: list of session feature dicts (each has id, geometry, meti_meta)
-    Returns: [{id, alt_id, year, enrichment, derived, errors}, ...]
+    Returns: {"records": [{id, alt_id, year, enrichment, derived, errors}, ...],
+              "failed_ids": [ids that got no data from any layer group],
+              "layer_errors": {id: [layer_groups that returned no data]}}
     """
     headers = {
         "Content-Type": "application/json",
         "X-UFFDA-Client": uffda_client_id,
     }
 
-    # Build normalized feature list for the API
+    # Build normalized feature list; ensure every feature has a unique non-empty ID
     api_features = []
-    for feat in features:
+    for idx, feat in enumerate(features):
         meta = feat.get("meti_meta") or {}
         start_at = meta.get("start_at") or DEFAULT_START_AT
         end_at = meta.get("end_at") or DEFAULT_END_AT
-        fid = feat.get("id") or ""
+        fid = feat.get("id") or feat.get("alt_id") or f"field-{idx}"
         api_features.append({
             "id": fid,
             "alt_id": fid,
@@ -129,6 +136,8 @@ def enrich_features(features: list, uffda_client_id: str) -> list:
             },
             "start_at": start_at,
         })
+
+    all_input_ids = {f["id"] for f in api_features}
 
     # Partition by year
     by_year: dict = {}
@@ -144,17 +153,25 @@ def enrich_features(features: list, uffda_client_id: str) -> list:
             batches.append((year, year_feats[offset:offset + BATCH_SIZE]))
 
     results = []
+    layer_errors: dict = {}  # fid -> list of layer groups that returned no data
+
     for batch_idx, (year, chunk) in enumerate(batches):
         by_id: dict = {}
+        chunk_ids = {f["id"] for f in chunk}
 
         for layer_group in LAYER_GROUPS:
             payload = _build_payload(chunk, year, layer_group)
             resp = _post_batch(payload, headers, f"batch {batch_idx} {layer_group}")
             if resp is None:
+                # Track which IDs lost this layer group
+                for fid in chunk_ids:
+                    layer_errors.setdefault(fid, []).append(layer_group)
                 continue
             for feat in resp.get("features", []):
                 props = feat.get("properties", {})
                 fid = props.get("id") or feat.get("id")
+                if not fid:
+                    continue
                 if fid not in by_id:
                     by_id[fid] = {
                         "id": fid,
@@ -172,4 +189,11 @@ def enrich_features(features: list, uffda_client_id: str) -> list:
         if batch_idx < len(batches) - 1:
             time.sleep(SLEEP_BETWEEN_CALLS)
 
-    return results
+    returned_ids = {r["id"] for r in results}
+    failed_ids = list(all_input_ids - returned_ids)
+
+    return {
+        "records": results,
+        "failed_ids": failed_ids,
+        "layer_errors": layer_errors,
+    }
