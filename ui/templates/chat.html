@@ -26,7 +26,7 @@
     </div>
     {% if feature_count > 20 %}
     <div class="insights-limit-bar">
-      ⚠ This file has {{ feature_count }} fields — Get Insights supports up to 20. Split into smaller uploads to use enrichment.
+      ⚠ This file has {{ feature_count }} fields — Get Insights supports up to 60. Split into smaller uploads to use enrichment.
     </div>
     {% endif %}
 
@@ -59,7 +59,7 @@
 <script>
 const SESSION_ID = "{{ session_id }}";
 const FEATURE_COUNT = {{ feature_count }};
-const INSIGHTS_MAX_FEATURES = 20;
+const INSIGHTS_MAX_FEATURES = 60;
 const FEATURES = {{ features | tojson }};
 const OPENING_MESSAGE = {{ opening_message | tojson }};
 

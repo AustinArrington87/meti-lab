@@ -8,7 +8,7 @@ from backend.services.claude_agent import _sessions
 
 router = APIRouter()
 
-MAX_FEATURES = 20  # beyond this UFFDA calls exceed the 120s proxy timeout
+MAX_FEATURES = 60  # layer groups run concurrently; 60 fields ≈ 48 calls ≈ 50-60s
 
 
 @router.post("/insights/enrich")
