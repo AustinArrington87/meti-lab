@@ -20,15 +20,15 @@
       <button id="insights-btn" class="btn-insights" onclick="runInsights()" title="Fetch UFFDA land use, soil, and climate data for carbon market eligibility screening">
         Get Insights
       </button>
-      {% if feature_count > 20 %}
-      <span class="insights-limit-notice" title="Get Insights works with up to 20 fields. This file has {{ feature_count }} — split it into smaller uploads to use enrichment.">
-        ⚠ {{ feature_count }} fields — Insights limited to 20
-      </span>
-      {% endif %}
       <button id="export-btn" class="btn-export" style="display:none" onclick="exportFile()">
         Export METI GeoJSON
       </button>
     </div>
+    {% if feature_count > 20 %}
+    <div class="insights-limit-bar">
+      ⚠ This file has {{ feature_count }} fields — Get Insights supports up to 20. Split into smaller uploads to use enrichment.
+    </div>
+    {% endif %}
 
     <div class="chat-messages" id="chat-messages"></div>
 
@@ -222,17 +222,6 @@ async function runRiskCheck() {
 // ---------------------------------------------------------------------------
 // Insights
 // ---------------------------------------------------------------------------
-
-// Disable the button immediately on page load if over the feature limit
-if (FEATURE_COUNT > INSIGHTS_MAX_FEATURES) {
-  document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('insights-btn');
-    if (btn) {
-      btn.disabled = true;
-      btn.title = `Get Insights supports up to ${INSIGHTS_MAX_FEATURES} fields. This file has ${FEATURE_COUNT} — split into smaller uploads to use enrichment.`;
-    }
-  });
-}
 
 async function runInsights() {
   if (FEATURE_COUNT > INSIGHTS_MAX_FEATURES) {
