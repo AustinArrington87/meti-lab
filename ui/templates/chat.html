@@ -7,6 +7,12 @@
 {% endblock %}
 
 {% block content %}
+{% if not account_name %}
+<div class="no-account-banner">
+  You're not linked to a METI account — your fields won't be registered to the clearinghouse until you are.
+  <a href="https://calendly.com/d/ckdc-3z8-gq4/millpont-chat" target="_blank" rel="noopener">Schedule a call with MillPont to get set up and have your sources registered to the METI clearinghouse for environmental outcomes →</a>
+</div>
+{% endif %}
 <div class="chat-layout">
 
   <!-- LEFT: Chat panel -->

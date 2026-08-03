@@ -32,6 +32,10 @@ body { font-family: system-ui, -apple-system, sans-serif; background: var(--gray
 main { flex: 1; overflow: hidden; }
 
 /* ── Upload page ── */
+.no-account-banner { background: #eff6ff; border-bottom: 1px solid #bfdbfe; color: #1e40af; font-size: .85rem; padding: 10px 24px; line-height: 1.5; }
+.no-account-banner a { color: #1d4ed8; font-weight: 600; text-decoration: underline; }
+.no-account-banner a:hover { color: #1e3a8a; }
+
 .upload-page { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; max-width: 900px; margin: 60px auto; padding: 0 24px; }
 .upload-card h1 { font-size: 1.6rem; margin-bottom: 8px; }
 .subtitle { color: var(--gray-600); margin-bottom: 24px; line-height: 1.5; }
