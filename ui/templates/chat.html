@@ -26,10 +26,10 @@
       <button id="insights-btn" class="btn-insights" onclick="runInsights()" title="Fetch UFFDA land use, soil, and climate data for carbon market eligibility screening">
         Get Insights
       </button>
-      <button id="export-btn" class="btn-export" style="display:none" onclick="exportFile()">
-        Export METI GeoJSON
+      <button id="export-btn" class="btn-export" style="display:none" onclick="exportFile()" title="Download valid METI GeoJSON payload">
+        Export
       </button>
-      <button id="submit-btn" class="btn-submit" style="display:none" onclick="submitToMETI()">
+      <button id="submit-btn" class="btn-submit" style="display:none" onclick="submitToMETI()" title="Submit this source to the METI clearinghouse">
         Submit to METI
       </button>
     </div>
@@ -69,7 +69,7 @@
 const SESSION_ID = "{{ session_id }}";
 const FEATURE_COUNT = {{ feature_count }};
 const INSIGHTS_MAX_FEATURES = 60;
-const HAS_ACCOUNT = {{ 'true' if account_id else 'false' }};
+const HAS_ACCOUNT = {{ 'true' if (account_id or is_admin) else 'false' }};
 const FEATURES = {{ features | tojson }};
 const OPENING_MESSAGE = {{ opening_message | tojson }};
 
