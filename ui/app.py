@@ -151,13 +151,32 @@ def logout():
 # Upload + session init
 # ---------------------------------------------------------------------------
 
+def _refresh_account_session():
+    """Re-fetch account info from DB and update session. Call on page entry."""
+    try:
+        from backend.services.db import get_user_account
+        auth0_id = session.get("profile", {}).get("user_id", "")
+        if not auth0_id:
+            return
+        user = get_user_account(auth0_id)
+        if user:
+            account_id = str(user["account_id"]) if user.get("account_id") else None
+            session["account_id"] = account_id
+            session["account_name"] = user["account_name"] if user.get("account_name") else None
+            session["is_admin"] = (account_id == MILLPONT_ACCOUNT_ID)
+    except Exception as exc:
+        logger.warning(f"Account session refresh failed: {exc}")
+
+
 @app.route("/")
 @requires_auth
 def index():
+    _refresh_account_session()
     return render_template(
         "index.html",
         user=session.get("profile", {}),
         account_name=session.get("account_name", ""),
+        account_id=session.get("account_id", ""),
         is_admin=session.get("is_admin", False),
     )
 
@@ -169,6 +188,7 @@ def upload():
         return render_template("index.html", error="No file selected.",
                                user=session.get("profile", {}),
                                account_name=session.get("account_name", ""),
+                               account_id=session.get("account_id", ""),
                                is_admin=session.get("is_admin", False))
 
     f = request.files["file"]
@@ -176,6 +196,7 @@ def upload():
         return render_template("index.html", error="No file selected.",
                                user=session.get("profile", {}),
                                account_name=session.get("account_name", ""),
+                               account_id=session.get("account_id", ""),
                                is_admin=session.get("is_admin", False))
 
     try:
@@ -198,6 +219,7 @@ def upload():
         return render_template("index.html", error=err_msg,
                                user=session.get("profile", {}),
                                account_name=session.get("account_name", ""),
+                               account_id=session.get("account_id", ""),
                                is_admin=session.get("is_admin", False))
 
     session["session_id"] = data["session_id"]
@@ -221,6 +243,7 @@ def upload():
         opening_message=opening_msg,
         user=session.get("profile", {}),
         account_name=session.get("account_name", ""),
+        account_id=session.get("account_id", ""),
         is_admin=session.get("is_admin", False),
     )
 
