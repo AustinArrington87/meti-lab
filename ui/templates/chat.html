@@ -29,6 +29,9 @@
       <button id="export-btn" class="btn-export" style="display:none" onclick="exportFile()">
         Export METI GeoJSON
       </button>
+      <button id="submit-btn" class="btn-submit" style="display:none" onclick="submitToMETI()">
+        Submit to METI
+      </button>
     </div>
     {% if feature_count > 60 %}
     <div class="insights-limit-bar">
@@ -66,6 +69,7 @@
 const SESSION_ID = "{{ session_id }}";
 const FEATURE_COUNT = {{ feature_count }};
 const INSIGHTS_MAX_FEATURES = 60;
+const HAS_ACCOUNT = {{ 'true' if account_name else 'false' }};
 const FEATURES = {{ features | tojson }};
 const OPENING_MESSAGE = {{ opening_message | tojson }};
 
@@ -485,7 +489,10 @@ function sendMessage() {
               buffer += parsed.content;
               setMessageHtml(replyId, buffer);
             } else if (parsed.type === 'done') {
-              if (parsed.export_ready) document.getElementById('export-btn').style.display = 'inline-block';
+              if (parsed.export_ready) {
+                document.getElementById('export-btn').style.display = 'inline-block';
+                if (HAS_ACCOUNT) document.getElementById('submit-btn').style.display = 'inline-block';
+              }
               if (parsed.dates_updated) silentRiskCheck();
               sendBtn.disabled = false; inputEl.disabled = false; inputEl.focus();
             } else if (parsed.type === 'error') {
@@ -505,6 +512,66 @@ function sendMessage() {
     setMessageHtml(replyId, 'Network error: ' + err);
     sendBtn.disabled = false; inputEl.disabled = false;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Submit to METI
+// ---------------------------------------------------------------------------
+async function submitToMETI() {
+  const confirmed = confirm(
+    'Submit these fields to the METI source ledger?\n\n' +
+    'This registers them as verified environmental source boundaries in the METI clearinghouse.'
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+
+  appendMessage('agent', 'Submitting to METI source ledger…', 'submit-status');
+
+  try {
+    const resp = await fetch('/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID })
+    });
+
+    let data;
+    try { data = await resp.json(); } catch (_) { data = {}; }
+
+    if (!resp.ok || data.error) {
+      const msg = data.error || data.detail || `Server error (HTTP ${resp.status})`;
+      setMessageHtml('submit-status', `**Submission failed:** ${msg}`);
+      btn.disabled = false;
+      btn.textContent = 'Submit to METI';
+      return;
+    }
+
+    const lines = ['**Successfully submitted to METI source ledger ✓**', ''];
+    lines.push(`${data.submitted_count} source${data.submitted_count !== 1 ? 's' : ''} registered:`);
+    for (const id of (data.source_ids || [])) {
+      lines.push(`- \`${id}\``);
+    }
+    if (data.warnings) {
+      lines.push('');
+      lines.push(`> ⚠ ${data.warnings}`);
+    }
+    if (data.conflicts && data.conflicts.length > 0) {
+      lines.push('');
+      lines.push(`> Note: ${data.conflicts.length} source(s) were flagged as overlapping with existing sources — review in the METI dashboard.`);
+    }
+    lines.push('');
+    lines.push('*Your sources are now in the METI clearinghouse and available for environmental outcome reporting.*');
+
+    setMessageHtml('submit-status', lines.join('\n'));
+    btn.textContent = 'Submitted ✓';
+
+  } catch (err) {
+    setMessageHtml('submit-status', 'Could not reach the server during submission. Check your connection and try again.');
+    btn.disabled = false;
+    btn.textContent = 'Submit to METI';
+  }
 }
 
 async function exportFile() {

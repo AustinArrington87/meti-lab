@@ -286,6 +286,32 @@ def insights_enrich():
         return jsonify({"error": detail}), 500
 
 
+@app.route("/submit", methods=["POST"])
+@requires_auth
+def submit_meti():
+    body = request.get_json()
+    session_id = body.get("session_id") or session.get("session_id")
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/api/submit",
+            params={"session_id": session_id},
+            headers=_account_headers(),
+            timeout=45,
+        )
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except requests.RequestException as exc:
+        try:
+            detail = exc.response.json().get("detail", str(exc))
+            status = exc.response.status_code
+        except Exception:
+            detail = str(exc)
+            status = 500
+        return jsonify({"error": detail}), status
+
+
 @app.route("/risk-check", methods=["POST"])
 @requires_auth
 def risk_check():
