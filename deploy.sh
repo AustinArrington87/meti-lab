@@ -60,6 +60,10 @@ for f in "${FILES[@]}"; do
   fi
 done
 
+# Patch EC2-specific .env values (local .env uses localhost, EC2 needs the real domain)
+ssh $SSH_OPTS "$EC2_HOST" \
+  "sed -i 's|AUTH0_CALLBACK_URL=http://localhost:5001/callback|AUTH0_CALLBACK_URL=https://lab.millpont.com/callback|' $REMOTE_DIR/.env 2>/dev/null || true"
+
 # Restart services
 echo "Restarting services..."
 ssh $SSH_OPTS "$EC2_HOST" \
