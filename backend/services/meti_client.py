@@ -168,8 +168,12 @@ def check_conflicts_db(session_features: list) -> dict:
 
             spatial_matches = resp.json()
 
+            missing_dates = not feat_start or not feat_end
+
             if not spatial_matches:
-                result[feature_id] = {"risk": "green", "conflict": False, "conflict_with": []}
+                # Spatially clear — but still yellow if dates aren't set yet
+                risk = "yellow" if missing_dates else "green"
+                result[feature_id] = {"risk": risk, "conflict": False, "conflict_with": []}
                 continue
 
             confirmed = []   # spatial + date overlap
@@ -185,7 +189,7 @@ def check_conflicts_db(session_features: list) -> dict:
 
             if confirmed:
                 risk, conflict_ids = "red", confirmed
-            elif potential:
+            elif potential or missing_dates:
                 risk, conflict_ids = "yellow", potential
             else:
                 risk, conflict_ids = "green", []
