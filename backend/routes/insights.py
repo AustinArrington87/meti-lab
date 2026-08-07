@@ -74,6 +74,7 @@ async def enrich_insights(session_id: str):
         "records": records,
         "scored": scored,
     }
+    _sessions.save(session_id)
 
     response: dict = {
         "feature_count": len(features),

@@ -5,11 +5,12 @@ from typing import Any, Generator, List, Optional
 import anthropic
 
 from backend.config import settings
+from backend.services.session_store import SessionStore
 
 client = anthropic.Anthropic(api_key=settings.claude_api_key)
 
-# In-memory session store: session_id → {features, messages, account_id, is_admin, export_ready}
-_sessions: dict = {}
+# Disk-backed session store — survives backend restarts
+_sessions = SessionStore()
 
 SYSTEM_PROMPT = """You are a GIS data specialist for the METI platform (Measurement, Evidence, and Transparency Initiative), operated by MillPont.
 
@@ -567,6 +568,8 @@ def chat_turn(session_id: str, user_message: str) -> Generator[str, None, None]:
                     session["dates_updated"] = True
 
         session["messages"].append({"role": "user", "content": tool_results})
+        # Persist after each tool roundtrip so restarts don't lose progress
+        _sessions.save(session_id)
         # Continue loop so model can respond to tool results
 
 

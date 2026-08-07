@@ -144,6 +144,7 @@ async def submit_to_meti(
     # Mark session as submitted
     session["submitted"] = True
     session["submitted_source_ids"] = [s["id"] for s in sources]
+    _sessions.save(session_id)
 
     return {
         "submitted_count": len(sources),
