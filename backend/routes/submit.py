@@ -91,9 +91,18 @@ async def submit_to_meti(
         ))
 
     # 6. Decode JWT to get v1_client_id and account_id claims
+    import uuid as _uuid
     claims = _decode_jwt_payload(token)
-    log.info("METI JWT claims: %s", {k: v for k, v in claims.items() if "meti" in k.lower() or k == "sub"})
-    v1_client_id = claims.get("https://api.meti.millpont.com/v1_client_id")
+    log.info("METI JWT claims: %s", {k: v for k, v in claims.items() if "meti" in k.lower() or k in ("sub", "azp")})
+    raw_v1 = claims.get("https://api.meti.millpont.com/v1_client_id")
+    # Validate it's a real UUID — the @clients sub claim is NOT valid here
+    v1_client_id = None
+    if raw_v1:
+        try:
+            _uuid.UUID(str(raw_v1))
+            v1_client_id = raw_v1
+        except ValueError:
+            log.warning("v1_client_id '%s' is not a valid UUID (got @clients sub?) — omitting created_by", raw_v1)
     account_id_from_token = (
         claims.get("https://api.meti.millpont.com/account_id") or x_account_id
     )
@@ -101,9 +110,8 @@ async def submit_to_meti(
     # 7. Build submission payload (export_payload already has feature_collection + METI fields)
     submit_payload = dict(export_payload)
     submit_payload["account_id"] = account_id_from_token
-    # created_by/updated_by must reference an existing row in the profiles table.
-    # Only set them if the token carries a v1_client_id claim; omit otherwise so
-    # the API can apply its own default rather than getting a bad FK value.
+    # created_by/updated_by must be a UUID present in the profiles table.
+    # Only set when v1_client_id is a valid UUID from the JWT.
     if v1_client_id:
         submit_payload["created_by"] = v1_client_id
         submit_payload["updated_by"] = v1_client_id
