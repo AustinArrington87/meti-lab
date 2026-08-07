@@ -6,7 +6,7 @@ from typing import Optional
 import requests as req
 from fastapi import APIRouter, Header, HTTPException
 
-from backend.config import settings
+from backend.config import settings, MILLPONT_ACCOUNT_ID
 from backend.services.claude_agent import _sessions
 from backend.services.meti_client import clear_token_cache, get_token_for_account
 
@@ -43,13 +43,22 @@ async def submit_to_meti(
             "Schedule a call with MillPont to get your account set up."
         ))
 
-    # 2. Must have per-account credentials configured in .env
-    creds = settings.account_credentials.get(x_account_id)
-    if not creds or not creds[0] or not creds[1]:
-        raise HTTPException(status_code=403, detail=(
-            "Submit privileges have not been configured for your account. "
-            "Contact a METI Administrator to request access."
-        ))
+    # 2. Must have credentials configured in .env.
+    # MillPont/admin accounts use METI_CLIENT_ID; other accounts use per-org credentials.
+    is_admin_account = (x_is_admin or "").lower() == "true" or x_account_id == MILLPONT_ACCOUNT_ID
+    if is_admin_account:
+        if not settings.meti_client_id or not settings.meti_client_secret:
+            raise HTTPException(status_code=403, detail=(
+                "Submit privileges have not been configured for your account. "
+                "Contact a METI Administrator to request access."
+            ))
+    else:
+        creds = settings.account_credentials.get(x_account_id)
+        if not creds or not creds[0] or not creds[1]:
+            raise HTTPException(status_code=403, detail=(
+                "Submit privileges have not been configured for your account. "
+                "Contact a METI Administrator to request access."
+            ))
 
     # 3. Session and export payload must exist
     session = _sessions.get(session_id)
