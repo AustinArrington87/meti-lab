@@ -92,9 +92,8 @@ async def submit_to_meti(
 
     # 6. Decode JWT to get v1_client_id and account_id claims
     claims = _decode_jwt_payload(token)
-    v1_client_id = (
-        claims.get("https://api.meti.millpont.com/v1_client_id") or x_account_id
-    )
+    log.info("METI JWT claims: %s", {k: v for k, v in claims.items() if "meti" in k.lower() or k == "sub"})
+    v1_client_id = claims.get("https://api.meti.millpont.com/v1_client_id")
     account_id_from_token = (
         claims.get("https://api.meti.millpont.com/account_id") or x_account_id
     )
@@ -102,8 +101,15 @@ async def submit_to_meti(
     # 7. Build submission payload (export_payload already has feature_collection + METI fields)
     submit_payload = dict(export_payload)
     submit_payload["account_id"] = account_id_from_token
-    submit_payload["created_by"] = v1_client_id
-    submit_payload["updated_by"] = v1_client_id
+    # created_by/updated_by must reference an existing row in the profiles table.
+    # Only set them if the token carries a v1_client_id claim; omit otherwise so
+    # the API can apply its own default rather than getting a bad FK value.
+    if v1_client_id:
+        submit_payload["created_by"] = v1_client_id
+        submit_payload["updated_by"] = v1_client_id
+    else:
+        submit_payload.pop("created_by", None)
+        submit_payload.pop("updated_by", None)
 
     # 8. POST to METI API
     headers = {
