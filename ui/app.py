@@ -171,7 +171,6 @@ def _refresh_account_session():
 @app.route("/")
 @requires_auth
 def index():
-    _refresh_account_session()
     return render_template(
         "index.html",
         user=session.get("profile", {}),
